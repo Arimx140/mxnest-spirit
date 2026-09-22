@@ -1,0 +1,67 @@
+MXNestSpirit — panneau d'imbrication pour Illustrator
+MX Spirit, Montpellier
+
+INSTALLATION
+  Windows : double-clic sur install-windows.bat
+  Mac     : double-clic sur install-mac.command (si refus : clic droit > Ouvrir)
+  Puis relance Illustrator : Fenetre > Extensions > MXNestSpirit
+
+Le panneau reste installe. Plus besoin de passer par Fichier > Scripts.
+
+POURQUOI C'EST PLUS RAPIDE QUE LE SCRIPT
+  Le calcul tourne dans le moteur JavaScript de Chrome, pas dans celui
+  d'Illustrator. Meme code, 30 a 50 fois plus vite. Illustrator ne fait
+  plus que lire les pieces et les reposer.
+
+ORDRE D'UTILISATION
+  1. Analyser
+  2. Imbriquer (l'apercu se met a jour a chaque amelioration trouvee)
+  3. Appliquer   -> Ctrl+Z annule tout d'un coup
+
+SI RIEN N'EST TROUVE
+  Clique sur "Que contient le fichier ?" : il liste les tons directs et les
+  couleurs presentes. Choisis ensuite "Meme couleur que le trace selectionne"
+  apres avoir clique sur un contour de coupe.
+
+HYBRID V0.2
+Le bouton « V10 + Sparrow » lance le moteur V10 puis Sparrow sur la même géométrie et
+reprend le meilleur plan avec l'affinage V10. Si Sparrow est indisponible, le V10 reste
+utilisable normalement.
+
+AJOUTS MX SPIRIT (0.5.0)
+  Le moteur de nesting de cette version est conservé tel quel.
+
+  REMPLISSAGE PAR STICKERS (volet repliable, colonne de gauche)
+    Jusqu'à 3 modèles, pris dans n'importe quel document ouvert.
+    Pour chacun : taille d'origine ou variable (mini/maxi en %), et nombre maxi.
+    Les modèles se partagent la chute à tour de rôle : deux stickers de même
+    taille en reçoivent chacun leur part. Rotation jusqu'à tous les 5°.
+    Remplir les vides (aperçu en gris) -> Poser les stickers (calque MXN_STICKERS).
+    La planche ne s'allonge jamais. Remplace l'ancien bouton "Semer le logo".
+
+  COINS LIBRES POUR LES REPÈRES GRAPHTEC (case dans les réglages)
+    Un carré (25 mm par défaut : repère Cutting Master de 20 mm à ras du coin + 5 mm) reste vide à chaque coin du plan de travail,
+    pour les pièces comme pour les stickers. Dessiné en pointillé dans l'aperçu.
+    Avec le moteur « sparrow-mx » (compilé par GitHub, voir sparrow-mx/),
+    Sparrow connaît les coins et organise le plan autour pendant sa recherche.
+    Avec l'ancien moteur, le plan de Sparrow est corrigé à l'arrivée
+    par la solution la plus courte parmi : pousser les pièces de quelques mm,
+    les déplacer, retourner tout le plan de 180° (si la rotation est permise),
+    décaler le plan d'un bloc ou, en dernier recours, allonger la planche.
+    Jamais de contact créé.
+    Si libérer les coins a dû allonger la planche (plan serré jusque dans les
+    angles), le panneau reprend ensuite la place perdue en tâche de fond :
+    8 s en Rapide, 15 s en Normale, 30 s en Maximale. L'aperçu se met à jour,
+    Stop garde le meilleur plan trouvé. Mesuré : +48 mm ramenés à +15 mm en
+    moyenne, parfois plus court que le plan d'origine.
+
+  PROFILS DE RÉGLAGES (volet repliable, en haut à droite)
+    Enregistre tous les réglages sous un nom (une surface d'impression = un
+    profil) ; les choisir dans la liste les charge. Les derniers réglages sont
+    de toute façon retrouvés à chaque ouverture du panneau.
+
+  UN NESTING PAR ONGLET ILLUSTRATOR
+    Chaque document garde son analyse, son plan et ses stickers.
+    Une recherche lancée continue en fond si on change d'onglet ; le nesting
+    des autres onglets redevient disponible dès qu'elle est terminée. En
+    revenant sur le document, le plan est retrouvé et peut être appliqué.

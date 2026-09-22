@@ -1,0 +1,124 @@
+diff -ruN a/src/probs/spp/entities/problem.rs b/src/probs/spp/entities/problem.rs
+--- a/src/probs/spp/entities/problem.rs	2006-07-24 01:21:28.000000000 +0000
++++ b/src/probs/spp/entities/problem.rs	2026-09-22 13:19:31.014791484 +0000
+@@ -51,7 +51,21 @@
+             * 1.00001;
+ 
+         // add the shape offset if any, the strip needs to be at least `offset` wider than the items
+-        let fitted_width = item_x_max + self.strip.shape_modify_config.offset.unwrap_or(0.0);
++        let offset = self.strip.shape_modify_config.offset.unwrap_or(0.0);
++        let mut fitted_width = item_x_max + offset;
++
++        // MXNestSpirit: an item lying in the band of a far-end corner must end
++        // a whole notch before the end of the strip, or the notch would cut it.
++        let n = self.strip.corner_notch;
++        if n > 0.0 {
++            let (lo, hi) = (n + offset, self.strip.fixed_height - n - offset);
++            for pi in self.layout.placed_items.values() {
++                let b = &pi.shape.bbox;
++                if b.y_min < lo || b.y_max > hi {
++                    fitted_width = fitted_width.max(b.x_max * 1.00001 + n + offset);
++                }
++            }
++        }
+ 
+         self.change_strip_width(fitted_width);
+         debug_assert_eq!(feasible_before, self.layout.is_feasible());
+diff -ruN a/src/probs/spp/entities/strip.rs b/src/probs/spp/entities/strip.rs
+--- a/src/probs/spp/entities/strip.rs	2006-07-24 01:21:28.000000000 +0000
++++ b/src/probs/spp/entities/strip.rs	2026-09-22 13:19:31.014893232 +0000
+@@ -1,6 +1,6 @@
+ use crate::collision_detection::CDEConfig;
+ use crate::entities::Container;
+-use crate::geometry::primitives::{Rect, SPolygon};
++use crate::geometry::primitives::{Point, Rect, SPolygon};
+ use crate::geometry::shape_modification::{ShapeModifyConfig, ShapeModifyMode};
+ use crate::geometry::{DTransformation, OriginalShape};
+ use anyhow::{Result, ensure};
+@@ -12,6 +12,10 @@
+     pub cde_config: CDEConfig,
+     pub shape_modify_config: ShapeModifyConfig,
+     pub width: f32,
++    /// MXNestSpirit: side of the empty square at each corner (0 = none).
++    /// The strip is rebuilt from this struct every time its width changes, so
++    /// the two corners at the far end follow the length during the search.
++    pub corner_notch: f32,
+ }
+ 
+ impl Strip {
+@@ -28,6 +32,7 @@
+             cde_config,
+             shape_modify_config,
+             width,
++            corner_notch: 0.0,
+         })
+     }
+ 
+@@ -43,7 +48,7 @@
+         Container::new(
+             id,
+             OriginalShape {
+-                shape: SPolygon::from(Rect::try_new(0.0, 0.0, s.width, s.fixed_height).unwrap()),
++                shape: strip_outline(&s),
+                 pre_transform: DTransformation::empty(),
+                 modify_mode: ShapeModifyMode::Deflate,
+                 modify_config: s.shape_modify_config,
+@@ -54,3 +59,22 @@
+         .unwrap()
+     }
+ }
++
++/// MXNestSpirit: the strip outline. A plain rectangle, or -- when
++/// `corner_notch` is set -- the same rectangle with a square cut out of each
++/// corner. Everything outside the outline is exterior, so no item can be
++/// placed in a notch. On a strip too short for four notches, the notch is
++/// reduced so the outline stays a valid simple polygon.
++fn strip_outline(s: &Strip) -> SPolygon {
++    let (w, h) = (s.width, s.fixed_height);
++    let n = s.corner_notch.min(w * 0.45).min(h * 0.45);
++    if n <= 0.0 {
++        return SPolygon::from(Rect::try_new(0.0, 0.0, w, h).unwrap());
++    }
++    let pts = vec![
++        Point(n, 0.0), Point(w - n, 0.0), Point(w - n, n), Point(w, n),
++        Point(w, h - n), Point(w - n, h - n), Point(w - n, h), Point(n, h),
++        Point(n, h - n), Point(0.0, h - n), Point(0.0, n), Point(n, n),
++    ];
++    SPolygon::new(pts).unwrap_or_else(|_| SPolygon::from(Rect::try_new(0.0, 0.0, w, h).unwrap()))
++}
+diff -ruN a/src/probs/spp/io/ext_repr.rs b/src/probs/spp/io/ext_repr.rs
+--- a/src/probs/spp/io/ext_repr.rs	2006-07-24 01:21:28.000000000 +0000
++++ b/src/probs/spp/io/ext_repr.rs	2026-09-22 13:19:31.015163460 +0000
+@@ -11,6 +11,10 @@
+     pub items: Vec<ExtItem>,
+     /// Fixed height of the strip
+     pub strip_height: f32,
++    /// MXNestSpirit: side of the square kept empty at each of the four corners
++    /// of the strip (registration marks). Absent or 0 = plain rectangle.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub corner_notch: Option<f32>,
+ }
+ 
+ /// Item with a demand
+diff -ruN a/src/probs/spp/io/import.rs b/src/probs/spp/io/import.rs
+--- a/src/probs/spp/io/import.rs	2006-07-24 01:21:28.000000000 +0000
++++ b/src/probs/spp/io/import.rs	2026-09-22 13:19:31.015225470 +0000
+@@ -48,7 +48,7 @@
+     // Initialize the base width for 100% density
+     let width = total_item_area / fixed_height;
+ 
+-    let base_strip = Strip::new(
++    let mut base_strip = Strip::new(
+         fixed_height,
+         importer.cde_config,
+         ShapeModifyConfig {
+@@ -58,6 +58,9 @@
+         },
+         width,
+     )?;
++    let notch = ext_instance.corner_notch.unwrap_or(0.0);
++    ensure!(notch >= 0.0 && notch < fixed_height / 2.0, "corner_notch must be >= 0 and < strip_height / 2");
++    base_strip.corner_notch = notch;
+ 
+     Ok(SPInstance::new(items, base_strip))
+ }

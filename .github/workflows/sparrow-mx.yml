@@ -1,0 +1,108 @@
+# Compile le moteur Sparrow modifié (coins Graphtec) pour Windows et Mac,
+# puis dépose les exécutables dans spiritpanel/bin/ du dépôt.
+# Se lance tout seul quand le dossier sparrow-mx/ change,
+# ou à la main : onglet Actions > « Moteur Sparrow MX » > Run workflow.
+name: Moteur Sparrow MX
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sparrow-mx/**'
+      - '.github/workflows/sparrow-mx.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruire les sources (Sparrow + jagua-rs + nos correctifs)
+        run: |
+          bash sparrow-mx/preparer.sh
+          rm -rf sparrow-mx/build/.git
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sources-sparrow-mx
+          path: sparrow-mx/build
+          include-hidden-files: true
+
+  windows:
+    needs: sources
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sources-sparrow-mx
+          path: src
+      - name: Compiler sparrow.exe
+        working-directory: src
+        env:
+          # runtime C intégré : l'exe ne dépend d'aucune DLL à installer
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          rustup update stable
+          rustup default stable
+          cargo build --release --locked --bin sparrow
+      - name: Test rapide
+        working-directory: src
+        shell: bash
+        run: |
+          printf '%s' '{"name":"t","strip_height":300,"corner_notch":27,"items":[{"id":0,"demand":2,"shape":{"type":"simple_polygon","data":[[0,0],[100,0],[100,60],[0,60],[0,0]]}}]}' > t.json
+          ./target/release/sparrow.exe -i t.json -t 3 -s 1 --min-item-separation 2 --workers 1
+          test -f output/final_t.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparrow-windows
+          path: src/target/release/sparrow.exe
+
+  macos:
+    needs: sources
+    runs-on: macos-14
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sources-sparrow-mx
+          path: src
+      - name: Compiler sparrow (universel Intel + Apple Silicon)
+        working-directory: src
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --locked --bin sparrow --target aarch64-apple-darwin
+          cargo build --release --locked --bin sparrow --target x86_64-apple-darwin
+          lipo -create -output sparrow \
+            target/aarch64-apple-darwin/release/sparrow \
+            target/x86_64-apple-darwin/release/sparrow
+          codesign --force -s - sparrow
+          ./sparrow --help > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparrow-macos
+          path: src/sparrow
+
+  publier:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sparrow-*
+          path: dl
+      - name: Déposer les moteurs dans spiritpanel/bin
+        run: |
+          cp dl/sparrow-windows/sparrow.exe spiritpanel/bin/sparrow.exe
+          cp dl/sparrow-macos/sparrow spiritpanel/bin/sparrow
+          chmod +x spiritpanel/bin/sparrow
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add spiritpanel/bin/sparrow.exe spiritpanel/bin/sparrow
+          if git diff --cached --quiet; then echo "Moteurs inchangés."; exit 0; fi
+          git commit -m "Moteur Sparrow MX compilé (coins Graphtec)"
+          git pull --rebase
+          git push

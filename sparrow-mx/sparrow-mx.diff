@@ -1,0 +1,64 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 5614863..4b63de0 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -15,7 +15,7 @@ name = "bench"
+ path = "src/bench.rs"
+ 
+ [dependencies]
+-jagua-rs = { features = ["spp"], version = "0.8.1" }
++jagua-rs = { features = ["spp"], path = "jagua-rs" }
+ rand = "0.10"
+ rand_distr = "0.6"
+ svg = "0.18"
+diff --git a/src/eval/collision_loss.rs b/src/eval/collision_loss.rs
+index 22ee7fd..4fb2188 100644
+--- a/src/eval/collision_loss.rs
++++ b/src/eval/collision_loss.rs
+@@ -42,7 +42,12 @@ impl<'a> CollisionLossEvaluator<'a> {
+     }
+ 
+     pub(super) fn add(&mut self, hazard: HazardEntity, shape: &SPolygon) -> bool {
+-        let remaining = self.loss_bound - self.loss;
++        // An unbounded evaluation stays unbounded even if accumulated loss overflows.
++        let remaining = if self.loss_bound == f32::INFINITY {
++            f32::INFINITY
++        } else {
++            self.loss_bound - self.loss
++        };
+         let Some(extra_loss) = self.calc_weighted_loss_bounded(hazard, shape, remaining) else {
+             return true;
+         };
+diff --git a/src/optimizer/worker.rs b/src/optimizer/worker.rs
+index d37079d..edabb42 100644
+--- a/src/optimizer/worker.rs
++++ b/src/optimizer/worker.rs
+@@ -8,7 +8,9 @@ use itertools::Itertools;
+ use jagua_rs::entities::{Instance, PItemKey};
+ use jagua_rs::geometry::DTransformation;
+ use jagua_rs::probs::spp::entities::{SPInstance, SPPlacement, SPProblem, SPSolution};
+-use log::debug;
++use log::{debug, warn};
++
++static NO_SAMPLE_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ use rand::prelude::SliceRandom;
+ use std::iter::Sum;
+ use std::ops::AddAssign;
+@@ -56,7 +58,16 @@ impl SeparatorWorker {
+                 let (best_sample, n_evals) =
+                     search::search_placement(&self.prob.layout, item, Some(pk), evaluator, self.sample_config, &mut self.rng);
+ 
+-                let (new_dt, _eval) = best_sample.expect("search_placement should always return a sample");
++                // MXNestSpirit: no sample for this item -> it keeps its current
++                // position (warned once) and the run continues. Feasibility is
++                // still decided by the engine's own collision check.
++                let Some((new_dt, _eval)) = best_sample else {
++                    if !NO_SAMPLE_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
++                        warn!("search_placement returned no sample; item keeps its position");
++                    }
++                    total_evals += n_evals;
++                    continue;
++                };
+ 
+                 // Move the item to the new position
+                 self.move_item(pk, new_dt);
